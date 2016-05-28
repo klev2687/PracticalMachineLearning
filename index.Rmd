@@ -1,0 +1,152 @@
+---
+title: "PML Assignment Final"
+author: "Klevin D."
+date: "May 28, 2016"
+output: html_document
+---
+
+###Executive Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively.The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+###Downloading Data And Cleaning
+The data is downloaded and loaded to the appropriate variables.
+```{r, ref.label="load.data", echo=FALSE, eval=TRUE, warning=FALSE}
+
+```
+```{r, echo=TRUE}
+dim(trainset)
+dim(testset)
+```
+
+Prelimnary look at trainset data shows that there are columns that serve only purpose of representing information about the process and thus dont serve as good predictors. Also, there are columns which contain 'NA' values. These columns are removed.
+```{r, ref.label="data.cleaning", echo=FALSE, eval=TRUE, warning=FALSE}
+
+```
+```{r echo=TRUE, eval=TRUE}
+dim(train_notpred)
+dim(train_nona)
+```
+
+###Evaluate Predictor Correlation
+The remaining `r dim(train_nona)[2]-1` predictors need to checked for high correlation among themselves. The high correlated predictors may cause bias during modelling and so must be removed. The correlation plot shows relationship between predictors. Predictors that have correlation value more than 0.75 are removed.
+
+```{r, ref.label="cor.check", eval=TRUE,echo=FALSE, warning=FALSE, message=FALSE}
+
+```
+```{r, eval=TRUE,echo=TRUE}
+dim(train_lowcor)
+```
+
+###Split Training Data For Cross Validation
+The training dataset with 31 predictors and result columns are split into 2 datasets for training our model and testing it.
+```{r, ref.label="cv.data", echo=FALSE,eval=TRUE, warning=FALSE}
+
+```
+```{r, echo=TRUE,eval=TRUE}
+dim(mini_train)
+dim(mini_test)
+```
+
+###Preprocess With Principal Component Analysis
+To further reduce the number of variables, the data is preprocessed with principal component method analysis. 
+```{r, ref.label="pca", echo=FALSE,eval=TRUE,warning=FALSE}
+
+```
+```{r, echo=TRUE,eval=TRUE}
+dim(mini_train_fin)
+dim(mini_test_fin)
+```
+This dataset with `r dim(mini_train_fin)[2]` will now be used for model fitting
+
+###Model Fitting
+Random forest is used as the training method. Resampling method was selected as cross validation to keep runtimes low while keeping similar level of accuracy.
+```{r,ref.label="modelfit", echo=FALSE, eval=TRUE, warning=FALSE, message=FALSE}
+
+```
+The model is evaluated on the mini testing dataset.
+```{r, ref.label="model.test", echo=FALSE, eval=TRUE, warning=FALSE}
+
+```
+The accuracy of this model is `r round(val_res$overall[1]*100,2)`%, which is very good. This model is accepted and applied to the original test set to classify the observations.
+Out-of-sample error is `r round((1-val_res$overall[1])*100,2)`%.
+
+###Testing Prediction
+The final test dataset needs to be prepared to match the predictors that are used on the model. The dataset is preprocessed using principal component analysis and then the model is applied. The results are as follows.
+```{r, ref.label="pred", echo=FALSE,eval=TRUE,warning=FALSE, message=FALSE}
+
+```
+
+
+\newpage
+
+###Appendix
+
+```{r load.data, echo=TRUE, eval=FALSE}
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",destfile = "trainingdata.csv")
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "testingdata.csv")
+trainset <- read.csv("trainingdata.csv", header = T, na.strings = c("NA",""))
+testset <- read.csv("testingdata.csv", header = T, na.strings = c("NA",""))
+```
+
+```{r data.cleaning, echo=TRUE, eval=FALSE}
+#remove unrelated variables
+train_notpred <- subset(trainset, select = c(8:ncol(trainset)))
+
+#identify columns that have NAs and remove them from train and test sets.
+train_nona <- train_notpred[,colSums(is.na(train_notpred))==0]
+```
+
+```{r cor.check, echo=TRUE,eval=FALSE}
+#find correlation between variables other than classe
+corrmat <- cor(train_nona[,-53])
+library(corrplot)
+library(caret)
+corrplot(corrmat, type="lower", method="color", tl.cex = 0.7, mar = c(0,2,0,2))
+
+#remove variables that have correlation 0.75 or higher
+train_lowcor <- train_nona[,-findCorrelation(corrmat, cutoff = 0.75)]
+```
+
+```{r cv.data, echo=TRUE,eval=FALSE}
+#create dataset from trainset for cross validation
+inTrain <- createDataPartition(train_lowcor$classe, p=0.7, list = F)
+mini_train <- train_lowcor[inTrain,]
+mini_test <- train_lowcor[-inTrain,]
+```
+
+```{r pca, echo=TRUE, eval=FALSE}
+#conduct principal component analysis
+mini_train_pca <- preProcess(mini_train[,-32], method = "pca")
+mini_train_fin <- predict(mini_train_pca, mini_train[,-32])
+mini_test_fin  <- predict(mini_train_pca, mini_test[,-32])
+```
+
+```{r modelfit, echo=TRUE, eval=FALSE}
+library(randomForest)
+modelFit <- train(mini_train$classe~.,
+                  data = mini_train_fin, 
+                  method="rf",
+                  trControl=trainControl(method = "cv", number = 4), 
+                  allowParallel=T, 
+                  importance=T)
+
+```
+
+```{r model.test, echo=TRUE, eval=FALSE}
+#Check prediction accuracy of model
+pred.mini.test <- predict(modelFit, newdata = mini_test_fin)
+val_res <- confusionMatrix(pred.mini.test, mini_test$classe)
+val_res$overall[1]
+```
+
+```{r pred,echo=TRUE,eval=FALSE}
+#Preparing testing data for prediction
+library(dplyr)
+test_nopca <- cbind(testset[,c(colnames(testset)%in%colnames(train_lowcor))], 
+                    problem_id=testset$problem_id)
+
+test_fin <- predict(mini_train_pca, test_nopca)
+
+#testing class classification
+predict(modelFit, test_fin)
+```
